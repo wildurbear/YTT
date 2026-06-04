@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YTT — Summarize</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <div class="app-header">
+      <h1>YTT</h1>
+      <div style="display:flex;align-items:center;gap:0.75rem;">
+        <span id="provider-badge" class="provider-badge">loading…</span>
+        <form method="POST" action="/logout" style="display:inline;">
+          <button type="submit" class="btn btn-danger">Log out</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="input-row">
+      <input
+        type="url"
+        id="url-input"
+        placeholder="https://www.youtube.com/watch?v=..."
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        inputmode="url"
+      />
+      <button class="btn" id="summarize-btn" onclick="handleSubmit()">Summarize</button>
+    </div>
+
+    <div id="url-error" class="alert alert-error hidden" role="alert"></div>
+
+    <!-- Spinner -->
+    <div id="spinner" class="spinner-wrap hidden">
+      <div class="spinner"></div>
+      <span id="spinner-msg">Fetching transcript…</span>
+    </div>
+
+    <!-- Long-video confirmation -->
+    <div id="confirm-card" class="confirm-card hidden">
+      <p id="confirm-msg"></p>
+      <div class="confirm-actions">
+        <button class="btn" id="confirm-yes" disabled onclick="confirmSummarize()">Yes, continue</button>
+        <button class="btn btn-danger" onclick="cancelConfirm()">Cancel</button>
+      </div>
+      <p id="countdown-msg" class="countdown"></p>
+    </div>
+
+    <!-- General error -->
+    <div id="api-error" class="alert alert-error hidden" role="alert"></div>
+
+    <!-- Results -->
+    <div id="result-card" class="result-card hidden">
+      <div id="md-output" class="md-output"></div>
+    </div>
+
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

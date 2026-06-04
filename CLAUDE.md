@@ -29,11 +29,12 @@ ytt/
 ├── server.js              # Express app, auth routes, API routes
 ├── package.json
 ├── .env                   # Secrets — NEVER commit this
-├── .gitignore             # Must include .env, node_modules
+├── .env.example           # Template — safe to commit
+├── .gitignore             # Excludes .env, node_modules
 ├── public/
-│   ├── index.html         # Login page (shown when unauthenticated)
-│   ├── app.html           # Main tool UI (protected route)
-│   ├── style.css          # Shared styles — mobile-first responsive
+│   ├── index.html         # Login page (unauthenticated root)
+│   ├── app.html           # Main tool UI — served only to authenticated requests at /app
+│   ├── style.css          # Shared styles — mobile-first, dark theme
 │   └── app.js             # Frontend JS for app.html
 └── CLAUDE.md              # This file
 ```
@@ -54,12 +55,16 @@ ytt/
 - The JWT secret (`JWT_SECRET`) must be a long random string stored in `.env`.
 
 ### Setup: Generating the Hashed Password
-Before first run, generate the hashed password once in a throwaway script or Node REPL:
+Before first run, generate the hashed password once (ESM project — use dynamic import):
 ```js
-const bcrypt = require('bcrypt');
-bcrypt.hash('YourStrongPasswordHere', 12).then(console.log);
+node -e "import('bcrypt').then(m => m.default.hash('YourStrongPasswordHere', 12)).then(console.log)"
 ```
 Paste the output into `.env` as `HASHED_PASSWORD`.
+
+To generate `JWT_SECRET`:
+```js
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+```
 
 ### Auth Security Hardening
 - Rate-limit login attempts: use `express-rate-limit` on the `/login` POST route. Suggested: 3 attempts per 3 hours per IP.
@@ -124,7 +129,7 @@ The frontend can show a friendly error message, but the enforcement lives server
 
 ## AI Provider Configuration
 
-The app should support **both Anthropic and OpenAI**, switchable with a single env var rather than commenting out code.
+Both Anthropic and OpenAI are supported, switchable with a single env var. **Default is Anthropic (Claude).**
 
 ### Switching mechanism
 In `.env`:
@@ -132,7 +137,11 @@ In `.env`:
 AI_PROVIDER=anthropic   # or: openai
 ```
 
-In `server.js`, a single dispatcher function reads `AI_PROVIDER` and calls the correct SDK. Neither SDK is imported/called if not in use.
+In `server.js`, the correct SDK is dynamically imported at startup based on `AI_PROVIDER`. Neither SDK is loaded if not in use. The active provider is displayed as a badge in the app UI (fetched from `GET /api/provider`).
+
+### Model used
+- Anthropic: `claude-sonnet-4-6`
+- OpenAI: `gpt-4o`
 
 ### Summarization prompt
 Send the transcript as user content. Keep the system prompt minimal — the output format spec handles structure:
@@ -193,10 +202,10 @@ Include this format in the summarization prompt as a required output template.
 - Loading state while the transcript is being fetched and summarized. The combined operation can take 10–30 seconds for long videos; show a spinner or progress message.
 - Error states: invalid URL (red inline message), transcript unavailable, AI error. All user-facing, no raw stack traces.
 
-### Nice-to-haves (implement if straightforward, skip if not)
+### Nice-to-haves (deferred — revisit after using the tool for a while)
 - Copy-to-clipboard button on the output.
 - Character/word count of the transcript before summarization.
-- A toggle to switch between AI providers if both are configured.
+- Runtime toggle in the UI to switch between AI providers.
 
 ---
 
@@ -234,20 +243,32 @@ Do not attempt to fall back to audio transcription — that's out of scope.
 
 ---
 
-## Open Questions / Clarifications Needed
+## Implementation Notes
 
-Before starting a full implementation, Claude Code may need answers to the following:
+- `package.json` uses `"type": "module"` — everything is ESM. Use `import`/`export` syntax throughout.
+- Auth flow: `GET /` serves `index.html` (login). On success → JWT cookie set → redirect to `GET /app` which serves `app.html`. Logout hits `POST /logout`, clears cookie, redirects to `/`.
+- Long-video guard: `POST /api/summarize` returns HTTP 202 with `requiresConfirmation: true` when the video exceeds 60 minutes. The frontend shows a warning card with a 3-second countdown before the confirm button becomes clickable. The client resends with `{ confirmed: true }` to proceed.
+- Transcript duration is estimated from the last segment's `offset + duration` fields (in milliseconds) returned by `youtube-transcript`.
+- Marked.js (CDN) converts the AI's Markdown response to HTML in the browser. Raw Markdown is never displayed to the user.
+- The provider badge in the app header is fetched from `GET /api/provider` on page load and reflects the server-side `AI_PROVIDER` env var.
+- CSP configured in `helmet` to allow `cdn.jsdelivr.net` for marked.js and block everything else external.
 
-1. **`server.js` reference file** — You mentioned you'll provide a `server.js` showing your preferred auth setup. Please share that before starting auth implementation.
-	1A: server.js file will be provided
-2. **AI provider preference** — Which do you want as the default? Anthropic (Claude) or OpenAI (GPT-4o)?
-	2A: Claude
-3. **Summary length preference** — Should the Detailed Summary aim for a specific length (e.g., ~300 words, ~500 words), or let the AI judge based on video length?
-	3A: AI can decide the summary length but regardless of length it should be quickly readable in a 5 minutes (this is just a number I'm making up) or less regardless of length.
-4. **Token/cost guard** — Very long videos (3+ hours) produce massive transcripts that can hit token limits or generate large API bills. Should we truncate transcripts above a certain length, chunk and summarize, or warn the user?
-	4A: We'll stick to the regular Sonnet here (I don't even think this is done in the code, I think that's done in the API). Since I'm the only one using it, it's not necessary to put a cap on it but JUST IN CASE, if the video is over 1 hour long, please specify the length explicitely and give a warning with a prompt asking me if I'm sure I want to continue with this very large query and doing it anyway if I allow it -- for this particular prompt, do not allow me to quickly press any buttons, give it like 3 seconds before it allows a response just in case I quickly press a button i didn't mean to press
-5. **Markdown rendering** — Is rendering the output as formatted Markdown in the browser sufficient, or do you also want a "raw Markdown" copy option?
-	5A: Convert to actual HTML so we see the real bold header and bullet points that look like bullet points rather than the RAW text. Keep in mind this is supposed to be readable in mobile too so keep that in mind.
+---
+
+## First-Run Setup Checklist
+
+1. `npm install`
+2. Generate `HASHED_PASSWORD`:
+   ```
+   node -e "import('bcrypt').then(m => m.default.hash('YourPassword', 12)).then(console.log)"
+   ```
+3. Generate `JWT_SECRET`:
+   ```
+   node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+   ```
+4. Copy `.env.example` → `.env` and fill in all values.
+5. `npm start` (or `npm run dev` for auto-restart on changes).
+
 ---
 
 *Last updated: June 2026*
