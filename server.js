@@ -95,33 +95,6 @@ function extractVideoId(rawUrl) {
   } catch { return null; }
 }
 
-function parseTranscriptXml(xml) {
-  const segments = [];
-  // srv3 format: <p t="ms" d="ms"><s>word</s></p>
-  const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
-  let m;
-  while ((m = pRegex.exec(xml)) !== null) {
-    const inner = m[3].replace(/<[^>]+>/g, '');
-    const text = decodeHtmlEntities(inner).trim();
-    if (text) segments.push({ text, offset: parseInt(m[1], 10), duration: parseInt(m[2], 10) });
-  }
-  if (segments.length > 0) return segments;
-  // Classic format: <text start="s" dur="s">content</text>
-  const re = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
-  while ((m = re.exec(xml)) !== null) {
-    const text = decodeHtmlEntities(m[3]).trim();
-    if (text) segments.push({ text, offset: parseFloat(m[1]) * 1000, duration: parseFloat(m[2]) * 1000 });
-  }
-  return segments;
-}
-
-function decodeHtmlEntities(str) {
-  return str
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)));
-}
 
 const WATCH_PAGE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -163,13 +136,27 @@ async function fetchTranscript(videoId) {
     console.log('[watchpage] tracks:', tracks ? tracks.map(t => `${t.languageCode} kind=${t.kind}`) : 'none');
     if (!Array.isArray(tracks) || tracks.length === 0) return null;
 
-    const track = tracks.find(t => t.languageCode === 'en') || tracks[0];
-    const xmlResp = await fetch(track.baseUrl, { headers: { 'User-Agent': WATCH_PAGE_UA } });
-    console.log(`[watchpage] XML status: ${xmlResp.status}`);
-    if (!xmlResp.ok) return null;
+    // Prefer manual English, then auto-generated English (kind=asr), then anything
+    const track =
+      tracks.find(t => t.languageCode === 'en' && t.kind !== 'asr') ||
+      tracks.find(t => t.languageCode === 'en') ||
+      tracks[0];
 
-    const xml = await xmlResp.text();
-    const segments = parseTranscriptXml(xml);
+    const jsonUrl = track.baseUrl + '&fmt=json3';
+    const jsonResp = await fetch(jsonUrl, { headers: { 'User-Agent': WATCH_PAGE_UA } });
+    console.log(`[watchpage] JSON status: ${jsonResp.status}`);
+    if (!jsonResp.ok) return null;
+
+    const data = await jsonResp.json();
+    const segments = (data.events || [])
+      .filter(e => e.segs)
+      .map(e => ({
+        text: e.segs.map(s => s.utf8).join('').trim(),
+        offset: e.tStartMs ?? 0,
+        duration: e.dDurationMs ?? 0,
+      }))
+      .filter(s => s.text && s.text !== '\n');
+
     console.log(`[watchpage] segments: ${segments.length}`);
     return segments.length > 0 ? segments : null;
   } catch (err) {
