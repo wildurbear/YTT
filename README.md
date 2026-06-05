@@ -15,7 +15,7 @@ Summarizes YouTube videos.
 - Anthropic SDK → claude-sonnet-4-6  
 - OpenAI SDK → gpt-4o (optional, switchable via env var)
 ### Transcript Fetching
-- Supadata API (third-party service)
+- [SupaData](https://supadata.ai/) API (third-party service)
 ### Frontend
 - Vanilla HTML/CSS/JS  
 - marked.js (CDN) — converts AI markdown output to rendered HTML
@@ -38,6 +38,3 @@ Since I'm using Railway to host, those changes are made in the **VARIABLES** sec
 In CMD/PS (NodeJS required)  
 `node -e "require('bcrypt').hash('YOURPASSWORDHERE', 12).then(console.log)"`  
 Then add under **HASHED_PASSWORD** in Variables
-
-## Transcript API
-Using [SupaData](https://supadata.ai/) for getting transcripts from YouTube.
