@@ -213,7 +213,12 @@ app.post('/api/summarize', requireAuthApi, async (req, res) => {
   let segments;
   try {
     segments = await YoutubeTranscript.fetchTranscript(url);
-  } catch {
+  } catch (err) {
+    console.error('Transcript fetch error:', err?.message || err);
+    const msg = err?.message || '';
+    if (msg.includes('captcha') || msg.includes('too many requests')) {
+      return res.status(503).json({ error: "YouTube is blocking transcript requests from this server. Try again later." });
+    }
     return res.status(422).json({ error: "This video doesn't have a transcript available. Try a different video." });
   }
 
