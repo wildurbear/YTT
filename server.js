@@ -107,6 +107,7 @@ async function fetchTranscript(videoId) {
         'User-Agent': WATCH_PAGE_UA,
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Cookie': 'CONSENT=YES+cb.en+20; SOCS=CAESEwgDEgk0OTI5NjY5MzIaAmVuIAEaBgiA_LysBg==',
       },
     });
     console.log(`[watchpage] status: ${pageResp.status}`);
