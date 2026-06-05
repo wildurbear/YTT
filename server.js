@@ -13,8 +13,9 @@ app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 // ── Startup checks ────────────────────────────────────────────────────────────
-if (!process.env.JWT_SECRET)       console.warn('WARNING: JWT_SECRET not set');
-if (!process.env.HASHED_PASSWORD)  console.warn('WARNING: HASHED_PASSWORD not set — login will always fail');
+if (!process.env.JWT_SECRET)        console.warn('WARNING: JWT_SECRET not set');
+if (!process.env.HASHED_PASSWORD)   console.warn('WARNING: HASHED_PASSWORD not set — login will always fail');
+if (!process.env.SUPADATA_API_KEY)  console.warn('WARNING: SUPADATA_API_KEY not set — transcript fetch will fail');
 
 const SESSION_DAYS = parseInt(process.env.SESSION_DAYS || '30', 10);
 const JWT_SECRET   = process.env.JWT_SECRET || 'dev-secret-change-me';
@@ -96,65 +97,24 @@ function extractVideoId(rawUrl) {
 }
 
 
-const WATCH_PAGE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
 async function fetchTranscript(videoId) {
-  // Fetch the watch page — ytInitialPlayerResponse embedded in the HTML
-  // contains caption tracks even when the InnerTube API withholds them for server IPs
   try {
-    const pageResp = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        'User-Agent': WATCH_PAGE_UA,
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Encoding': 'identity',
-        'Cookie': 'CONSENT=YES+cb.en+20; SOCS=CAESEwgDEgk0OTI5NjY5MzIaAmVuIAEaBgiA_LysBg==',
-      },
+    const resp = await fetch(`https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&lang=en`, {
+      headers: { 'x-api-key': process.env.SUPADATA_API_KEY },
     });
-    if (!pageResp.ok) {
-      console.error(`[transcript] watch page status: ${pageResp.status}`);
+    if (!resp.ok) {
+      console.error(`[transcript] Supadata status: ${resp.status}`);
       return null;
     }
-
-    const html = await pageResp.text();
-    if (html.includes('class="g-recaptcha"')) return null;
-
-    const marker = 'var ytInitialPlayerResponse = ';
-    const start = html.indexOf(marker);
-    if (start === -1) return null;
-
-    let depth = 0, end = -1;
-    for (let i = start + marker.length; i < html.length; i++) {
-      if (html[i] === '{') depth++;
-      else if (html[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
-    }
-    if (end === -1) return null;
-
-    const playerResponse = JSON.parse(html.slice(start + marker.length, end + 1));
-    const tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (!Array.isArray(tracks) || tracks.length === 0) return null;
-
-    const track =
-      tracks.find(t => t.languageCode === 'en' && t.kind !== 'asr') ||
-      tracks.find(t => t.languageCode === 'en') ||
-      tracks[0];
-
-    const jsonResp = await fetch(track.baseUrl + '&fmt=json3', {
-      headers: { 'User-Agent': WATCH_PAGE_UA, 'Accept-Encoding': 'identity' },
-    });
-    if (!jsonResp.ok) return null;
-
-    const data = await jsonResp.json();
-    const segments = (data.events || [])
-      .filter(e => e.segs)
-      .map(e => ({
-        text: e.segs.map(s => s.utf8).join('').trim(),
-        offset: e.tStartMs ?? 0,
-        duration: e.dDurationMs ?? 0,
-      }))
-      .filter(s => s.text && s.text !== '\n');
-
-    return segments.length > 0 ? segments : null;
+    const data = await resp.json();
+    const content = data.content;
+    if (!Array.isArray(content) || content.length === 0) return null;
+    // Normalise to { text, offset (ms), duration (ms) }
+    return content.map(s => ({
+      text: s.text,
+      offset: (s.offset ?? 0) * 1000,
+      duration: (s.duration ?? 0) * 1000,
+    }));
   } catch (err) {
     console.error('[transcript] error:', err.message);
     return null;
