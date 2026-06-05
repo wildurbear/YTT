@@ -86,26 +86,6 @@ function requireAuthApi(req, res, next) {
 }
 
 // ── Transcript fetching ────────────────────────────────────────────────────────
-const INNERTUBE_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
-
-// Try multiple client contexts — WEB works best for auto-generated captions
-const INNERTUBE_CLIENTS = [
-  {
-    clientName: 'WEB',
-    clientVersion: '2.20240101.00.00',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  },
-  {
-    clientName: 'ANDROID',
-    clientVersion: '19.09.37',
-    userAgent: 'com.google.android.youtube/19.09.37 (Linux; U; Android 14)',
-  },
-  {
-    clientName: 'TVHTML5',
-    clientVersion: '7.20240101.16.00',
-    userAgent: 'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) SamsungBrowser/3.1 TV Safari/538.1',
-  },
-];
 
 function extractVideoId(rawUrl) {
   try {
@@ -143,39 +123,59 @@ function decodeHtmlEntities(str) {
     .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)));
 }
 
-async function fetchTranscript(videoId) {
-  for (const client of INNERTUBE_CLIENTS) {
-    try {
-      const resp = await fetch(INNERTUBE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': client.userAgent },
-        body: JSON.stringify({
-          context: { client: { clientName: client.clientName, clientVersion: client.clientVersion } },
-          videoId,
-        }),
-      });
-      console.log(`[${client.clientName}] InnerTube status: ${resp.status}`);
-      if (!resp.ok) continue;
-      const data = await resp.json();
-      const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-      console.log(`[${client.clientName}] tracks:`, tracks ? tracks.map(t => `${t.languageCode} kind=${t.kind}`) : 'none');
-      if (!Array.isArray(tracks) || tracks.length === 0) continue;
+const WATCH_PAGE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-      // Prefer English, fall back to first available
-      const track = tracks.find(t => t.languageCode === 'en') || tracks[0];
-      const xmlResp = await fetch(track.baseUrl, { headers: { 'User-Agent': client.userAgent } });
-      console.log(`[${client.clientName}] XML fetch status: ${xmlResp.status}`);
-      if (!xmlResp.ok) continue;
-      const xml = await xmlResp.text();
-      const segments = parseTranscriptXml(xml);
-      console.log(`[${client.clientName}] parsed segments: ${segments.length}`);
-      if (segments.length > 0) return segments;
-    } catch (err) {
-      console.log(`[${client.clientName}] error: ${err.message}`);
-      continue;
+async function fetchTranscript(videoId) {
+  // Fetch the watch page — ytInitialPlayerResponse embedded in the HTML
+  // contains caption tracks even when the InnerTube API withholds them for server IPs
+  try {
+    const pageResp = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent': WATCH_PAGE_UA,
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+    console.log(`[watchpage] status: ${pageResp.status}`);
+    if (!pageResp.ok) return null;
+
+    const html = await pageResp.text();
+
+    if (html.includes('class="g-recaptcha"')) {
+      console.log('[watchpage] blocked by captcha');
+      return null;
     }
+
+    // Extract ytInitialPlayerResponse from inline script
+    const marker = 'var ytInitialPlayerResponse = ';
+    const start = html.indexOf(marker);
+    if (start === -1) { console.log('[watchpage] ytInitialPlayerResponse not found'); return null; }
+
+    let depth = 0, end = -1;
+    for (let i = start + marker.length; i < html.length; i++) {
+      if (html[i] === '{') depth++;
+      else if (html[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end === -1) { console.log('[watchpage] could not parse JSON boundary'); return null; }
+
+    const playerResponse = JSON.parse(html.slice(start + marker.length, end + 1));
+    const tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    console.log('[watchpage] tracks:', tracks ? tracks.map(t => `${t.languageCode} kind=${t.kind}`) : 'none');
+    if (!Array.isArray(tracks) || tracks.length === 0) return null;
+
+    const track = tracks.find(t => t.languageCode === 'en') || tracks[0];
+    const xmlResp = await fetch(track.baseUrl, { headers: { 'User-Agent': WATCH_PAGE_UA } });
+    console.log(`[watchpage] XML status: ${xmlResp.status}`);
+    if (!xmlResp.ok) return null;
+
+    const xml = await xmlResp.text();
+    const segments = parseTranscriptXml(xml);
+    console.log(`[watchpage] segments: ${segments.length}`);
+    return segments.length > 0 ? segments : null;
+  } catch (err) {
+    console.log('[watchpage] error:', err.message);
+    return null;
   }
-  return null;
 }
 
 // ── URL validation ─────────────────────────────────────────────────────────────
