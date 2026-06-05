@@ -107,55 +107,44 @@ async function fetchTranscript(videoId) {
         'User-Agent': WATCH_PAGE_UA,
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Encoding': 'identity',
         'Cookie': 'CONSENT=YES+cb.en+20; SOCS=CAESEwgDEgk0OTI5NjY5MzIaAmVuIAEaBgiA_LysBg==',
       },
     });
-    console.log(`[watchpage] status: ${pageResp.status}`);
-    if (!pageResp.ok) return null;
-
-    const html = await pageResp.text();
-
-    if (html.includes('class="g-recaptcha"')) {
-      console.log('[watchpage] blocked by captcha');
+    if (!pageResp.ok) {
+      console.error(`[transcript] watch page status: ${pageResp.status}`);
       return null;
     }
 
-    // Extract ytInitialPlayerResponse from inline script
+    const html = await pageResp.text();
+    if (html.includes('class="g-recaptcha"')) return null;
+
     const marker = 'var ytInitialPlayerResponse = ';
     const start = html.indexOf(marker);
-    if (start === -1) { console.log('[watchpage] ytInitialPlayerResponse not found'); return null; }
+    if (start === -1) return null;
 
     let depth = 0, end = -1;
     for (let i = start + marker.length; i < html.length; i++) {
       if (html[i] === '{') depth++;
       else if (html[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
     }
-    if (end === -1) { console.log('[watchpage] could not parse JSON boundary'); return null; }
+    if (end === -1) return null;
 
     const playerResponse = JSON.parse(html.slice(start + marker.length, end + 1));
     const tracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    console.log('[watchpage] tracks:', tracks ? tracks.map(t => `${t.languageCode} kind=${t.kind}`) : 'none');
     if (!Array.isArray(tracks) || tracks.length === 0) return null;
 
-    // Prefer manual English, then auto-generated English (kind=asr), then anything
     const track =
       tracks.find(t => t.languageCode === 'en' && t.kind !== 'asr') ||
       tracks.find(t => t.languageCode === 'en') ||
       tracks[0];
 
-    const jsonUrl = track.baseUrl + '&fmt=json3';
-    const jsonResp = await fetch(jsonUrl, { headers: { 'User-Agent': WATCH_PAGE_UA } });
-    console.log(`[watchpage] JSON status: ${jsonResp.status}`);
+    const jsonResp = await fetch(track.baseUrl + '&fmt=json3', {
+      headers: { 'User-Agent': WATCH_PAGE_UA, 'Accept-Encoding': 'identity' },
+    });
     if (!jsonResp.ok) return null;
 
-    const jsonText = await jsonResp.text();
-    console.log('[watchpage] json text length:', jsonText.length);
-    console.log('[watchpage] json text preview:', jsonText.slice(0, 200));
-    const data = JSON.parse(jsonText);
-    console.log('[watchpage] json keys:', Object.keys(data));
-    console.log('[watchpage] events count:', data.events?.length ?? 'undefined');
-    if (data.events?.length > 0) console.log('[watchpage] first event:', JSON.stringify(data.events[0]));
-
+    const data = await jsonResp.json();
     const segments = (data.events || [])
       .filter(e => e.segs)
       .map(e => ({
@@ -165,10 +154,9 @@ async function fetchTranscript(videoId) {
       }))
       .filter(s => s.text && s.text !== '\n');
 
-    console.log(`[watchpage] segments: ${segments.length}`);
     return segments.length > 0 ? segments : null;
   } catch (err) {
-    console.log('[watchpage] error:', err.message);
+    console.error('[transcript] error:', err.message);
     return null;
   }
 }
