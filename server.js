@@ -154,19 +154,24 @@ async function fetchTranscript(videoId) {
           videoId,
         }),
       });
+      console.log(`[${client.clientName}] InnerTube status: ${resp.status}`);
       if (!resp.ok) continue;
       const data = await resp.json();
       const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      console.log(`[${client.clientName}] tracks:`, tracks ? tracks.map(t => `${t.languageCode} kind=${t.kind}`) : 'none');
       if (!Array.isArray(tracks) || tracks.length === 0) continue;
 
       // Prefer English, fall back to first available
       const track = tracks.find(t => t.languageCode === 'en') || tracks[0];
       const xmlResp = await fetch(track.baseUrl, { headers: { 'User-Agent': client.userAgent } });
+      console.log(`[${client.clientName}] XML fetch status: ${xmlResp.status}`);
       if (!xmlResp.ok) continue;
       const xml = await xmlResp.text();
       const segments = parseTranscriptXml(xml);
+      console.log(`[${client.clientName}] parsed segments: ${segments.length}`);
       if (segments.length > 0) return segments;
-    } catch {
+    } catch (err) {
+      console.log(`[${client.clientName}] error: ${err.message}`);
       continue;
     }
   }
