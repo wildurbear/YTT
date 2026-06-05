@@ -148,7 +148,10 @@ async function fetchTranscript(videoId) {
     console.log(`[watchpage] JSON status: ${jsonResp.status}`);
     if (!jsonResp.ok) return null;
 
-    const data = await jsonResp.json();
+    const jsonText = await jsonResp.text();
+    console.log('[watchpage] json text length:', jsonText.length);
+    console.log('[watchpage] json text preview:', jsonText.slice(0, 200));
+    const data = JSON.parse(jsonText);
     console.log('[watchpage] json keys:', Object.keys(data));
     console.log('[watchpage] events count:', data.events?.length ?? 'undefined');
     if (data.events?.length > 0) console.log('[watchpage] first event:', JSON.stringify(data.events[0]));
