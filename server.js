@@ -4,7 +4,6 @@ import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
-import { YoutubeTranscript } from 'youtube-transcript';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -84,6 +83,94 @@ function requireAuthApi(req, res, next) {
     res.clearCookie('token');
     res.status(401).json({ error: 'Session expired — please log in again.' });
   }
+}
+
+// ── Transcript fetching ────────────────────────────────────────────────────────
+const INNERTUBE_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
+
+// Try multiple client contexts — WEB works best for auto-generated captions
+const INNERTUBE_CLIENTS = [
+  {
+    clientName: 'WEB',
+    clientVersion: '2.20240101.00.00',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  },
+  {
+    clientName: 'ANDROID',
+    clientVersion: '19.09.37',
+    userAgent: 'com.google.android.youtube/19.09.37 (Linux; U; Android 14)',
+  },
+  {
+    clientName: 'TVHTML5',
+    clientVersion: '7.20240101.16.00',
+    userAgent: 'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) SamsungBrowser/3.1 TV Safari/538.1',
+  },
+];
+
+function extractVideoId(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.hostname === 'youtu.be') return url.pathname.slice(1).split('/')[0];
+    return url.searchParams.get('v') || null;
+  } catch { return null; }
+}
+
+function parseTranscriptXml(xml) {
+  const segments = [];
+  // srv3 format: <p t="ms" d="ms"><s>word</s></p>
+  const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
+  let m;
+  while ((m = pRegex.exec(xml)) !== null) {
+    const inner = m[3].replace(/<[^>]+>/g, '');
+    const text = decodeHtmlEntities(inner).trim();
+    if (text) segments.push({ text, offset: parseInt(m[1], 10), duration: parseInt(m[2], 10) });
+  }
+  if (segments.length > 0) return segments;
+  // Classic format: <text start="s" dur="s">content</text>
+  const re = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
+  while ((m = re.exec(xml)) !== null) {
+    const text = decodeHtmlEntities(m[3]).trim();
+    if (text) segments.push({ text, offset: parseFloat(m[1]) * 1000, duration: parseFloat(m[2]) * 1000 });
+  }
+  return segments;
+}
+
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)));
+}
+
+async function fetchTranscript(videoId) {
+  for (const client of INNERTUBE_CLIENTS) {
+    try {
+      const resp = await fetch(INNERTUBE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': client.userAgent },
+        body: JSON.stringify({
+          context: { client: { clientName: client.clientName, clientVersion: client.clientVersion } },
+          videoId,
+        }),
+      });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      if (!Array.isArray(tracks) || tracks.length === 0) continue;
+
+      // Prefer English, fall back to first available
+      const track = tracks.find(t => t.languageCode === 'en') || tracks[0];
+      const xmlResp = await fetch(track.baseUrl, { headers: { 'User-Agent': client.userAgent } });
+      if (!xmlResp.ok) continue;
+      const xml = await xmlResp.text();
+      const segments = parseTranscriptXml(xml);
+      if (segments.length > 0) return segments;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 // ── URL validation ─────────────────────────────────────────────────────────────
@@ -210,15 +297,11 @@ app.post('/api/summarize', requireAuthApi, async (req, res) => {
   }
 
   // Fetch transcript
-  let segments;
-  try {
-    segments = await YoutubeTranscript.fetchTranscript(url);
-  } catch (err) {
-    console.error('Transcript fetch error:', err?.message || err);
-    const msg = err?.message || '';
-    if (msg.includes('captcha') || msg.includes('too many requests')) {
-      return res.status(503).json({ error: "YouTube is blocking transcript requests from this server. Try again later." });
-    }
+  const videoId = extractVideoId(url);
+  if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL.' });
+
+  const segments = await fetchTranscript(videoId);
+  if (!segments) {
     return res.status(422).json({ error: "This video doesn't have a transcript available. Try a different video." });
   }
 
