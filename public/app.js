@@ -13,10 +13,12 @@ let pendingUrl = null;
   }
 })();
 
-// Allow Enter key in the URL field
+document.getElementById('summarize-btn').addEventListener('click', handleSubmit);
 document.getElementById('url-input').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') handleSubmit();
 });
+document.getElementById('confirm-yes').addEventListener('click', confirmSummarize);
+document.getElementById('confirm-cancel').addEventListener('click', cancelConfirm);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function show(id)   { document.getElementById(id).classList.remove('hidden'); }

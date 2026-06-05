@@ -32,7 +32,7 @@
         spellcheck="false"
         inputmode="url"
       />
-      <button class="btn" id="summarize-btn" onclick="handleSubmit()">Summarize</button>
+      <button class="btn" id="summarize-btn">Summarize</button>
     </div>
 
     <div id="url-error" class="alert alert-error hidden" role="alert"></div>
@@ -47,8 +47,8 @@
     <div id="confirm-card" class="confirm-card hidden">
       <p id="confirm-msg"></p>
       <div class="confirm-actions">
-        <button class="btn" id="confirm-yes" disabled onclick="confirmSummarize()">Yes, continue</button>
-        <button class="btn btn-danger" onclick="cancelConfirm()">Cancel</button>
+        <button class="btn" id="confirm-yes" disabled>Yes, continue</button>
+        <button class="btn btn-danger" id="confirm-cancel">Cancel</button>
       </div>
       <p id="countdown-msg" class="countdown"></p>
     </div>
