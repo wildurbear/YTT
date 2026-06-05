@@ -112,8 +112,8 @@ async function fetchTranscript(videoId) {
     // Normalise to { text, offset (ms), duration (ms) }
     return content.map(s => ({
       text: s.text,
-      offset: (s.offset ?? 0) * 1000,
-      duration: (s.duration ?? 0) * 1000,
+      offset: s.offset ?? 0,
+      duration: s.duration ?? 0,
     }));
   } catch (err) {
     console.error('[transcript] error:', err.message);
