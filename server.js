@@ -145,9 +145,11 @@ Return your summary in exactly this Markdown structure:
 [video title or best inferred title from content]
 
 ## TLDR
-[one to three sentence summary]
+[two to four sentence summary]
 
 ## Main Takeaways
+- [takeaway]
+- [takeaway]
 - [takeaway]
 - [takeaway]
 - [takeaway]
@@ -156,6 +158,8 @@ Return your summary in exactly this Markdown structure:
 [paragraph-form summary — aim for readability within 5 minutes regardless of video length; be thorough but tight]
 
 ## Notable Quotes
+- "[quote]"
+- "[quote]"
 - "[quote]"
 - "[quote]"
 - "[quote]"
